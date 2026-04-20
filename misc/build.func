@@ -48,14 +48,8 @@ EOF
 }
 
 variables() {
-  # normalise APP → NSAPP (lowercase, spaces→hyphens)
   NSAPP=$(echo "${APP,,}" | tr -s ' ' '-')
   var_install="${NSAPP}-install"
-
-  PVEHOST=$(hostname -f)
-  PVEVERSION=$(pveversion | grep -oP '[\d.]+' | head -1)
-
-  # resource defaults (can be overridden by var_* set in ct script)
   : "${var_cpu:=2}"
   : "${var_ram:=1024}"
   : "${var_disk:=8}"
@@ -65,11 +59,10 @@ variables() {
   : "${var_tags:=ai}"
 }
 
-# ── container-id helpers ────────────────────────────────────────────────────────
+# ── container-id helper ─────────────────────────────────────────────────────────
 get_valid_nextid() {
   local id=100
-  while pct status "$id" &>/dev/null || qm status "$id" &>/dev/null || \
-        [[ -f "/etc/pve/lxc/${id}.conf" ]] || [[ -f "/etc/pve/qemu-server/${id}.conf" ]]; do
+  while [[ -f "/etc/pve/lxc/${id}.conf" ]] || [[ -f "/etc/pve/qemu-server/${id}.conf" ]]; do
     (( id++ ))
   done
   echo "$id"
@@ -77,52 +70,70 @@ get_valid_nextid() {
 
 # ── storage helpers ─────────────────────────────────────────────────────────────
 list_storages() {
-  pvesm status --content rootdir 2>/dev/null | awk 'NR>1 && $2=="active" {print $1}'
+  # List active storages that support LXC root filesystems (rootdir content type)
+  pvesm status --content rootdir 2>/dev/null \
+    | awk 'NR>1 && $2=="active" {print $1}'
 }
 
 select_storage() {
-  local stores; stores=$(list_storages)
-  local count; count=$(echo "$stores" | wc -l)
-  if [[ $count -eq 1 ]]; then
-    CONTAINER_STORAGE="$(echo "$stores")"
-    TEMPLATE_STORAGE="$(pvesm status --content vztmpl 2>/dev/null | awk 'NR>1 && $2=="active" {print $1; exit}')"
-    [[ -z "$TEMPLATE_STORAGE" ]] && TEMPLATE_STORAGE="$CONTAINER_STORAGE"
-    return
+  local stores
+  stores=$(list_storages)
+
+  # Remove trailing newline and check if truly empty
+  stores=$(echo "$stores" | grep -v '^$' || true)
+
+  if [[ -z "$stores" ]]; then
+    msg_error "No active storage supporting LXC containers found."
+    msg_error "Run 'pvesm status --content rootdir' to diagnose."
+    exit 1
   fi
 
-  local menu_items=()
-  while read -r s; do
-    menu_items+=("$s" "")
-  done <<< "$stores"
+  local count
+  count=$(echo "$stores" | wc -l)
 
-  CONTAINER_STORAGE=$(whiptail --backtitle "gesa-agent installer" \
-    --title "Container Storage" \
-    --menu "Select storage for the container rootfs:" 16 60 8 \
-    "${menu_items[@]}" 3>&1 1>&2 2>&3) || exit 1
+  if [[ "$count" -eq 1 ]]; then
+    CONTAINER_STORAGE="$stores"
+  else
+    local menu_items=()
+    while IFS= read -r s; do
+      [[ -n "$s" ]] && menu_items+=("$s" "")
+    done <<< "$stores"
 
-  TEMPLATE_STORAGE=$(pvesm status --content vztmpl 2>/dev/null | awk 'NR>1 && $2=="active" {print $1; exit}')
-  [[ -z "$TEMPLATE_STORAGE" ]] && TEMPLATE_STORAGE="$CONTAINER_STORAGE"
+    CONTAINER_STORAGE=$(whiptail --backtitle "gesa-agent installer" \
+      --title "Container Storage" \
+      --menu "Select storage for the container rootfs:" 16 60 8 \
+      "${menu_items[@]}" 3>&1 1>&2 2>&3) || exit 1
+  fi
+
+  # Template storage: prefer a storage with vztmpl content, fall back to container storage
+  TEMPLATE_STORAGE=$(pvesm status --content vztmpl 2>/dev/null \
+    | awk 'NR>1 && $2=="active" {print $1; exit}')
+  [[ -z "$TEMPLATE_STORAGE" ]] && TEMPLATE_STORAGE="local"
 }
 
 # ── template ────────────────────────────────────────────────────────────────────
 ensure_template() {
-  local TMPL="debian-${var_version}-standard_${var_version}."
+  local tmpl_prefix="debian-${var_version}-standard"
 
-  # find any matching template already downloaded
-  TEMPLATE_FILE=$(pvesm list "$TEMPLATE_STORAGE" 2>/dev/null | \
-    awk -v t="$TMPL" '$0 ~ t {print $1; exit}')
+  # Check if any matching template is already downloaded
+  TEMPLATE_FILE=$(pvesm list "$TEMPLATE_STORAGE" 2>/dev/null \
+    | awk -v p="$tmpl_prefix" '$0 ~ p {print $1; exit}')
 
   if [[ -z "$TEMPLATE_FILE" ]]; then
     msg_info "Downloading Debian ${var_version} template"
+    pveam update >/dev/null 2>&1 || true
     local avail
-    avail=$(pveam available --section system 2>/dev/null | \
-      awk -v t="$TMPL" '$0 ~ t {print $2; exit}')
-    [[ -z "$avail" ]] && { msg_error "Template not found. Run: pveam update"; exit 1; }
-    pveam download "$TEMPLATE_STORAGE" "$avail" >/dev/null 2>&1
+    avail=$(pveam available --section system 2>/dev/null \
+      | awk -v p="$tmpl_prefix" '$0 ~ p {print $2; exit}')
+    if [[ -z "$avail" ]]; then
+      msg_error "Debian ${var_version} template not found in pveam. Run: pveam update"
+      exit 1
+    fi
+    pveam download "$TEMPLATE_STORAGE" "$avail"
     TEMPLATE_FILE="${TEMPLATE_STORAGE}:vztmpl/${avail}"
     msg_ok "Downloaded template"
   else
-    msg_ok "Template already present"
+    msg_ok "Template already present: ${TEMPLATE_FILE}"
   fi
 }
 
@@ -131,10 +142,10 @@ default_settings() {
   CTID=$(get_valid_nextid)
   select_storage
 
-  CT_TYPE="$var_unprivileged"   # 1 = unprivileged
+  CT_TYPE="$var_unprivileged"
   CORE_COUNT="$var_cpu"
   RAM_SIZE="$var_ram"
-  DISK_SIZE="${var_disk}G"
+  DISK_SIZE="${var_disk}"
   HN="${NSAPP}"
   BRG="vmbr0"
   NET="dhcp"
@@ -148,10 +159,11 @@ default_settings() {
   ${DGN}Hostname       : ${GN}${HN}${CL}
   ${DGN}CPU cores      : ${GN}${CORE_COUNT}${CL}
   ${DGN}RAM            : ${GN}${RAM_SIZE} MB${CL}
-  ${DGN}Disk           : ${GN}${DISK_SIZE}${CL}
+  ${DGN}Disk           : ${GN}${DISK_SIZE} GB${CL}
   ${DGN}OS             : ${GN}Debian ${var_version}${CL}
   ${DGN}Network        : ${GN}${BRG} / DHCP${CL}
-  ${DGN}Storage        : ${GN}${CONTAINER_STORAGE}${CL}"
+  ${DGN}Storage        : ${GN}${CONTAINER_STORAGE}${CL}
+  ${DGN}Template store : ${GN}${TEMPLATE_STORAGE}${CL}"
   echo
 }
 
@@ -168,7 +180,7 @@ advanced_settings() {
     --title "Hostname" 3>&1 1>&2 2>&3) || exit 1
 
   DISK_SIZE=$(whiptail --backtitle "gesa-agent installer" \
-    --inputbox "Disk size (e.g. 8G)" 8 50 "${var_disk}G" \
+    --inputbox "Disk size in GB (number only, e.g. 8)" 8 50 "${var_disk}" \
     --title "Disk Size" 3>&1 1>&2 2>&3) || exit 1
 
   CORE_COUNT=$(whiptail --backtitle "gesa-agent installer" \
@@ -221,7 +233,6 @@ start() {
   fi
 }
 
-# ── check helpers (used by update_script) ────────────────────────────────────────
 check_container_storage() { :; }
 check_container_resources() { :; }
 
@@ -229,7 +240,6 @@ check_container_resources() { :; }
 build_container() {
   ensure_template
 
-  # Determine privilege flag for pct create
   local priv_flag=""
   [[ "${CT_TYPE:-1}" == "1" ]] && priv_flag="--unprivileged 1"
 
@@ -238,24 +248,22 @@ build_container() {
   [[ -n "${MTU:-}"  ]] && net_opts+=",mtu=${MTU}"
 
   msg_info "Creating LXC container ${CTID}"
+  # shellcheck disable=SC2086
   pct create "${CTID}" "${TEMPLATE_FILE}" \
     --hostname "${HN}" \
     --cores    "${CORE_COUNT}" \
     --memory   "${RAM_SIZE}" \
-    --rootfs   "${CONTAINER_STORAGE}:${DISK_SIZE//G/}" \
+    --rootfs   "${CONTAINER_STORAGE}:${DISK_SIZE}" \
     --net0     "${net_opts}" \
     --features nesting=1 \
     --onboot   1 \
     ${priv_flag} \
-    --tags     "${var_tags}" \
-    >/dev/null 2>&1
+    --tags     "${var_tags}"
   msg_ok "Created LXC container ${CTID}"
-
-  [[ "${SSH:-no}" == "yes" ]] && \
-    pct exec "${CTID}" -- bash -c "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" 2>/dev/null || true
 
   msg_info "Starting container"
   pct start "${CTID}"
+  sleep 5
   msg_ok "Started container"
 
   msg_info "Waiting for network"
@@ -264,22 +272,22 @@ build_container() {
     pct exec "${CTID}" -- ping -c1 -W2 1.1.1.1 &>/dev/null && break
     sleep 3
   done
-  (( retries < 0 )) && { msg_error "Container did not reach the network."; exit 1; }
+  if (( retries < 0 )); then
+    msg_error "Container did not reach the network within 60s."
+    exit 1
+  fi
   msg_ok "Network is up"
 
-  # FUNCTIONS_FILE_PATH is evaluated inside the container via:
-  #   source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
   local FUNCTIONS_FILE_PATH="source <(curl -fsSL ${REPO_RAW}/misc/install.func)"
   local VERBOSE_FLAG="${VERB:-no}"
 
-  msg_info "Running install script"
+  msg_info "Running install script inside container"
   pct exec "${CTID}" -- bash -c \
-    "export APP='${APP}' VERBOSE='${VERBOSE_FLAG}' FUNCTIONS_FILE_PATH='${FUNCTIONS_FILE_PATH}'; \
-     bash -s" <<< "$(curl -fsSL "${REPO_RAW}/install/gesa-agent-install.sh")"
+    "export APP='${APP}' VERBOSE='${VERBOSE_FLAG}' FUNCTIONS_FILE_PATH='${FUNCTIONS_FILE_PATH}'; bash -s" \
+    <<< "$(curl -fsSL "${REPO_RAW}/install/gesa-agent-install.sh")"
   msg_ok "Install script completed"
 
   IP=$(pct exec "${CTID}" -- hostname -I 2>/dev/null | awk '{print $1}')
-  CTID="${CTID}"
 }
 
 description() { :; }
