@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# install.func — container-side helpers for gesa-agent install scripts
+# Modelled after community-scripts/ProxmoxVE install.func (MIT)
+
+# ── colours ─────────────────────────────────────────────────────────────────────
+RD=$(printf '\033[01;31m')
+YW=$(printf '\033[33m')
+GN=$(printf '\033[1;92m')
+CL=$(printf '\033[m')
+BFR='\r\033[K'
+HOLD=' '
+
+# ── suppress-or-show helper ──────────────────────────────────────────────────────
+# $STD acts as a command prefix: "$STD some_command" runs command quietly or verbosely.
+# community-scripts pattern: STD is either empty string or "silent" wrapper.
+# We implement it as a function alias written to /usr/local/bin so it survives exec.
+if [[ "${VERBOSE:-no}" == "yes" ]]; then
+  function STD { "$@"; }
+else
+  function STD { "$@" >/dev/null 2>&1; }
+fi
+export -f STD
+
+color() { :; }
+
+# ── message helpers ──────────────────────────────────────────────────────────────
+msg_info()  { printf " ${HOLD} ${YW}%-45s${CL}" "${1}..."; }
+msg_ok()    { printf "${BFR} ${GN}✓${CL} %s\n" "${1}"; }
+msg_error() { printf "${BFR} ${RD}✗${CL} %s\n" "${1}" >&2; }
+
+# ── error handling ───────────────────────────────────────────────────────────────
+catch_errors() {
+  set -euo pipefail
+  trap 'msg_error "Error at line ${LINENO}. Exit code: $?"; exit 1' ERR
+}
+
+# ── IPv6 verbosity ───────────────────────────────────────────────────────────────
+verb_ip6() { :; }
+
+# ── initial container setup ──────────────────────────────────────────────────────
+setting_up_container() {
+  msg_info "Setting up container"
+  rm -f /etc/update-motd.d/10-uname 2>/dev/null || true
+  msg_ok "Container ready"
+}
+
+# ── network check ────────────────────────────────────────────────────────────────
+network_check() {
+  msg_info "Checking network"
+  local retries=10
+  while (( retries-- > 0 )); do
+    ping -c1 -W2 1.1.1.1 &>/dev/null && break
+    sleep 2
+  done
+  (( retries < 0 )) && { msg_error "No network connectivity"; exit 1; }
+  msg_ok "Network OK"
+}
+
+# ── update OS ────────────────────────────────────────────────────────────────────
+update_os() {
+  msg_info "Updating OS"
+  export DEBIAN_FRONTEND=noninteractive
+  STD apt-get update
+  STD apt-get -y dist-upgrade
+  msg_ok "Updated OS"
+}
+
+# ── MOTD ─────────────────────────────────────────────────────────────────────────
+motd_ssh() {
+  msg_info "Customising MOTD"
+  cat >/etc/motd <<'EOF'
+
+  ┌─────────────────────────────────────────┐
+  │          GESA Multi-Agent Chatbox       │
+  │   Manage: systemctl status gesa-agent   │
+  │   Logs:   journalctl -u gesa-agent -f   │
+  │   Config: nano /opt/gesa-agent/.env.local│
+  └─────────────────────────────────────────┘
+
+EOF
+  msg_ok "MOTD set"
+}
+
+customize() { :; }
+
+# ── cleanup ──────────────────────────────────────────────────────────────────────
+cleanup_lxc() {
+  msg_info "Cleaning up"
+  STD apt-get autoremove -y
+  STD apt-get clean
+  rm -rf /tmp/* /var/lib/apt/lists/*
+  msg_ok "Cleaned up"
+}
