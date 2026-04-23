@@ -7,8 +7,8 @@ const AGENTS_DIR = path.join(process.cwd(), 'agents');
 
 const DEFAULT_COLORS = ['purple', 'blue', 'green', 'orange', 'red', 'pink', 'teal'];
 const DEFAULT_MODEL_VERSION: Record<ModelProvider, string> = {
-  claude: 'claude-opus-4-7',
-  mistral: 'mistral-large-latest',
+  claude: process.env.CLAUDE_MODEL || 'claude-opus-4-7',
+  mistral: process.env.MISTRAL_MODEL || 'mistral-large-latest',
 };
 
 export function loadAgents(): AgentConfig[] {

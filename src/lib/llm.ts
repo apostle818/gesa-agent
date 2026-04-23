@@ -70,6 +70,21 @@ export async function* streamClaude(
   }
 }
 
+const parsedMaxRetries = Number(process.env.MISTRAL_MAX_RETRIES);
+const MISTRAL_MAX_RETRIES = Number.isFinite(parsedMaxRetries) && parsedMaxRetries >= 0
+  ? parsedMaxRetries
+  : 4;
+const MISTRAL_RETRY_CAP_MS = 15_000;
+
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const asNumber = Number(header);
+  if (Number.isFinite(asNumber)) return Math.max(0, asNumber * 1000);
+  const asDate = Date.parse(header);
+  if (Number.isFinite(asDate)) return Math.max(0, asDate - Date.now());
+  return null;
+}
+
 export async function* streamMistral(
   agent: AgentConfig,
   history: ConversationMessage[]
@@ -78,26 +93,38 @@ export async function* streamMistral(
   if (!apiKey) throw new Error('MISTRAL_API_KEY is not set');
 
   const messages = formatHistory(history, agent.id);
-
-  const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: agent.modelVersion,
-      messages: [{ role: 'system', content: agent.systemPrompt }, ...messages],
-      stream: true,
-      max_tokens: 1024,
-    }),
+  const body = JSON.stringify({
+    model: agent.modelVersion,
+    messages: [{ role: 'system', content: agent.systemPrompt }, ...messages],
+    stream: true,
+    max_tokens: 1024,
   });
 
-  if (!response.ok) {
-    throw new Error(`Mistral API error ${response.status}: ${await response.text()}`);
+  let response: Response | undefined;
+  for (let attempt = 0; attempt <= MISTRAL_MAX_RETRIES; attempt++) {
+    response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body,
+    });
+
+    if (response.status !== 429 || attempt === MISTRAL_MAX_RETRIES) break;
+
+    const retryAfter = parseRetryAfterMs(response.headers.get('retry-after'));
+    const backoff = Math.min(1000 * 2 ** attempt, MISTRAL_RETRY_CAP_MS);
+    const waitMs = Math.min(retryAfter ?? backoff, MISTRAL_RETRY_CAP_MS);
+    await response.body?.cancel();
+    await new Promise(r => setTimeout(r, waitMs));
   }
 
-  const reader = response.body!.getReader();
+  if (!response!.ok) {
+    throw new Error(`Mistral API error ${response!.status}: ${await response!.text()}`);
+  }
+
+  const reader = response!.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 

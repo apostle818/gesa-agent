@@ -1,7 +1,6 @@
 ---
 name: The Scientist
 model: mistral
-modelVersion: mistral-large-latest
 color: blue
 ---
 

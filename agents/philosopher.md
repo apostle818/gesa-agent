@@ -1,7 +1,6 @@
 ---
 name: The Philosopher
 model: claude
-modelVersion: claude-opus-4-7
 color: purple
 ---
 

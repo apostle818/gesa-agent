@@ -5,6 +5,10 @@ import AgentPanel from '@/components/AgentPanel';
 import ChatMessage from '@/components/ChatMessage';
 import { AgentConfig, ConversationMessage } from '@/types';
 
+// Short breather between agent turns so we don't fan out into upstream
+// per-second rate limits (Mistral free tier is ~1 req/s).
+const TURN_DELAY_MS = 600;
+
 // crypto.randomUUID is only defined in secure contexts (HTTPS/localhost); fall
 // back to Math.random for LAN deploys served over plain HTTP.
 const uuid = (): string => {
@@ -156,6 +160,10 @@ export default function Home() {
             timestamp: new Date().toISOString(),
           },
         ];
+
+        if (turn < maxTurns - 1 && !controller.signal.aborted) {
+          await new Promise(r => setTimeout(r, TURN_DELAY_MS));
+        }
       }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') console.error(e);
