@@ -15,6 +15,9 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-4-7}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-large-latest}
+      MISTRAL_MAX_RETRIES: ${MISTRAL_MAX_RETRIES:-4}
       NODE_ENV: production
     # Mount your own agent prompts over the baked-in ones (optional).
     # volumes:
