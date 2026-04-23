@@ -1,13 +1,14 @@
 services:
   gesa-agent:
     container_name: gesa-agent
-    # For Portainer: use the prebuilt image once published, e.g.
-    #   image: ghcr.io/apostle818/gesa-agent:latest
-    # or let Portainer build from the repository context below.
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: gesa-agent:latest
+    # Pulls the multi-arch image published by .github/workflows/docker-publish.yml.
+    # Override with GESA_AGENT_IMAGE to pin a specific tag (e.g. sha-abc1234 or v1.2.3).
+    # For local builds instead, comment out `image:` and uncomment the `build:` block.
+    image: ${GESA_AGENT_IMAGE:-ghcr.io/apostle818/gesa-agent:latest}
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${GESA_AGENT_PORT:-3000}:3000"
