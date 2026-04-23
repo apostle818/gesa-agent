@@ -5,6 +5,19 @@ import AgentPanel from '@/components/AgentPanel';
 import ChatMessage from '@/components/ChatMessage';
 import { AgentConfig, ConversationMessage } from '@/types';
 
+// crypto.randomUUID is only defined in secure contexts (HTTPS/localhost); fall
+// back to Math.random for LAN deploys served over plain HTTP.
+const uuid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 export default function Home() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -41,7 +54,7 @@ export default function Home() {
     signal: AbortSignal
   ): Promise<string> => {
     const agent = agents.find(a => a.id === agentId)!;
-    const msgId = crypto.randomUUID();
+    const msgId = uuid();
 
     setMessages(prev => [
       ...prev,
@@ -114,7 +127,7 @@ export default function Home() {
         // Inject any pending user message before this agent turn
         if (pendingUserMsg.current) {
           const injection: ConversationMessage = {
-            id: crypto.randomUUID(),
+            id: uuid(),
             agentId: 'user',
             agentName: 'You',
             model: 'user',
@@ -135,7 +148,7 @@ export default function Home() {
         history = [
           ...history,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             agentId,
             agentName: agent.name,
             model: agent.model,
@@ -172,7 +185,7 @@ export default function Home() {
       setMessages(prev => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: uuid(),
           agentId: 'user',
           agentName: 'You',
           model: 'user',
