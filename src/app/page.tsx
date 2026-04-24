@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import AgentPanel from '@/components/AgentPanel';
+import AgentEditor, { EditorMode } from '@/components/AgentEditor';
 import ChatMessage from '@/components/ChatMessage';
 import { AgentConfig, ConversationMessage } from '@/types';
 
@@ -31,13 +32,55 @@ export default function Home() {
   const [userInput, setUserInput] = useState('');
   const [maxTurns, setMaxTurns] = useState(8);
   const [currentTurn, setCurrentTurn] = useState(0);
+  const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pendingUserMsg = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetch('/api/agents').then(r => r.json()).then(setAgents).catch(console.error);
+  const refreshAgents = useCallback(async () => {
+    try {
+      const res = await fetch('/api/agents');
+      const data: AgentConfig[] = await res.json();
+      setAgents(data);
+      return data;
+    } catch (e) {
+      console.error(e);
+      return [] as AgentConfig[];
+    }
   }, []);
+
+  useEffect(() => {
+    refreshAgents();
+  }, [refreshAgents]);
+
+  const handleAgentSaved = useCallback(async () => {
+    await refreshAgents();
+  }, [refreshAgents]);
+
+  const handleDeleteAgent = useCallback(
+    async (agent: AgentConfig) => {
+      if (isRunning) return;
+      const ok = typeof window !== 'undefined'
+        ? window.confirm(`Delete agent "${agent.name}"? This removes agents/${agent.id}.md.`)
+        : true;
+      if (!ok) return;
+      try {
+        const res = await fetch(`/api/agents/${agent.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.error || 'Delete failed');
+        }
+        setSelectedIds(prev => prev.filter(id => id !== agent.id));
+        await refreshAgents();
+      } catch (e) {
+        console.error(e);
+        if (typeof window !== 'undefined') {
+          window.alert(e instanceof Error ? e.message : 'Delete failed');
+        }
+      }
+    },
+    [isRunning, refreshAgents]
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -211,7 +254,23 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-white overflow-hidden">
-      <AgentPanel agents={agents} selectedIds={selectedIds} onToggle={toggleAgent} />
+      <AgentPanel
+        agents={agents}
+        selectedIds={selectedIds}
+        onToggle={toggleAgent}
+        onCreate={() => setEditorMode({ kind: 'create' })}
+        onClone={agent => setEditorMode({ kind: 'clone', source: agent })}
+        onEdit={agent => setEditorMode({ kind: 'edit', source: agent })}
+        onDelete={handleDeleteAgent}
+      />
+
+      {editorMode && (
+        <AgentEditor
+          mode={editorMode}
+          onClose={() => setEditorMode(null)}
+          onSaved={handleAgentSaved}
+        />
+      )}
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}

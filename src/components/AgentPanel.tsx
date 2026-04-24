@@ -20,13 +20,33 @@ interface Props {
   agents: AgentConfig[];
   selectedIds: string[];
   onToggle: (id: string) => void;
+  onCreate: () => void;
+  onClone: (agent: AgentConfig) => void;
+  onEdit: (agent: AgentConfig) => void;
+  onDelete: (agent: AgentConfig) => void;
 }
 
-export default function AgentPanel({ agents, selectedIds, onToggle }: Props) {
+export default function AgentPanel({
+  agents,
+  selectedIds,
+  onToggle,
+  onCreate,
+  onClone,
+  onEdit,
+  onDelete,
+}: Props) {
   return (
     <div className="w-64 border-r bg-gray-50 flex flex-col shrink-0">
       <div className="p-4 border-b">
-        <h2 className="font-semibold text-gray-900">Agents</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">Agents</h2>
+          <button
+            onClick={onCreate}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
+            + New
+          </button>
+        </div>
         <p className="text-xs text-gray-500 mt-0.5">
           Select agents — order = turn order
         </p>
@@ -37,51 +57,78 @@ export default function AgentPanel({ agents, selectedIds, onToggle }: Props) {
           const pos = selectedIds.indexOf(agent.id);
           const selected = pos !== -1;
           return (
-            <button
+            <div
               key={agent.id}
-              onClick={() => onToggle(agent.id)}
-              className={`w-full text-left p-3 rounded-lg border transition-all ${
+              className={`group relative w-full text-left p-3 rounded-lg border transition-all ${
                 selected
                   ? 'border-blue-400 bg-blue-50 shadow-sm'
                   : 'border-gray-200 bg-white hover:border-gray-300'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${DOT_COLOR[agent.color] ?? 'bg-gray-400'}`}
-                />
-                <span className="font-medium text-sm text-gray-900 truncate flex-1">
-                  {agent.name}
-                </span>
-                {selected && (
-                  <span className="text-xs text-blue-600 font-bold shrink-0">
-                    #{pos + 1}
+              <button
+                onClick={() => onToggle(agent.id)}
+                className="w-full text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${DOT_COLOR[agent.color] ?? 'bg-gray-400'}`}
+                  />
+                  <span className="font-medium text-sm text-gray-900 truncate flex-1">
+                    {agent.name}
                   </span>
-                )}
-              </div>
+                  {selected && (
+                    <span className="text-xs text-blue-600 font-bold shrink-0">
+                      #{pos + 1}
+                    </span>
+                  )}
+                </div>
 
-              <div className="flex items-center gap-1 mt-1.5 ml-[18px]">
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${MODEL_BADGE[agent.model] ?? ''}`}>
-                  {agent.model}
-                </span>
-                <span className="text-xs text-gray-400 truncate">{agent.modelVersion}</span>
+                <div className="flex items-center gap-1 mt-1.5 ml-[18px]">
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${MODEL_BADGE[agent.model] ?? ''}`}>
+                    {agent.model}
+                  </span>
+                  <span className="text-xs text-gray-400 truncate">{agent.modelVersion}</span>
+                </div>
+              </button>
+
+              <div className="mt-2 ml-[18px] flex items-center gap-3 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => onEdit(agent)}
+                  className="text-gray-500 hover:text-blue-600"
+                  aria-label={`Edit ${agent.name}`}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onClone(agent)}
+                  className="text-gray-500 hover:text-blue-600"
+                  aria-label={`Clone ${agent.name}`}
+                >
+                  Clone
+                </button>
+                <button
+                  onClick={() => onDelete(agent)}
+                  className="text-gray-500 hover:text-red-600"
+                  aria-label={`Delete ${agent.name}`}
+                >
+                  Delete
+                </button>
               </div>
-            </button>
+            </div>
           );
         })}
 
         {agents.length === 0 && (
           <p className="text-xs text-gray-400 text-center py-6">
-            No agents found. Add <code className="bg-gray-100 px-1 rounded">.md</code> files
-            to the <code className="bg-gray-100 px-1 rounded">agents/</code> directory.
+            No agents yet. Click <strong className="text-gray-600">+ New</strong> to create one.
           </p>
         )}
       </div>
 
       <div className="p-3 border-t">
         <p className="text-xs text-gray-400 leading-relaxed">
-          Edit or add personas in{' '}
-          <code className="bg-gray-100 px-1 rounded">agents/*.md</code>
+          Agents are stored as <code className="bg-gray-100 px-1 rounded">.md</code> files in{' '}
+          <code className="bg-gray-100 px-1 rounded">agents/</code>.
         </p>
       </div>
     </div>
