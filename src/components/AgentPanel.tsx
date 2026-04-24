@@ -24,6 +24,9 @@ interface Props {
   onClone: (agent: AgentConfig) => void;
   onEdit: (agent: AgentConfig) => void;
   onDelete: (agent: AgentConfig) => void;
+  gitBacked?: boolean;
+  syncing?: boolean;
+  onSync?: () => void;
 }
 
 export default function AgentPanel({
@@ -34,18 +37,33 @@ export default function AgentPanel({
   onClone,
   onEdit,
   onDelete,
+  gitBacked,
+  syncing,
+  onSync,
 }: Props) {
   return (
     <div className="w-64 border-r bg-gray-50 flex flex-col shrink-0">
       <div className="p-4 border-b">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-gray-900">Agents</h2>
-          <button
-            onClick={onCreate}
-            className="text-xs font-medium text-blue-600 hover:text-blue-800"
-          >
-            + New
-          </button>
+          <div className="flex items-center gap-3">
+            {gitBacked && onSync && (
+              <button
+                onClick={onSync}
+                disabled={syncing}
+                className="text-xs font-medium text-gray-500 hover:text-blue-600 disabled:opacity-50"
+                title="Pull latest agents from the remote repo"
+              >
+                {syncing ? 'Syncing…' : 'Refresh'}
+              </button>
+            )}
+            <button
+              onClick={onCreate}
+              className="text-xs font-medium text-blue-600 hover:text-blue-800"
+            >
+              + New
+            </button>
+          </div>
         </div>
         <p className="text-xs text-gray-500 mt-0.5">
           Select agents — order = turn order
@@ -127,8 +145,9 @@ export default function AgentPanel({
 
       <div className="p-3 border-t">
         <p className="text-xs text-gray-400 leading-relaxed">
-          Agents are stored as <code className="bg-gray-100 px-1 rounded">.md</code> files in{' '}
-          <code className="bg-gray-100 px-1 rounded">agents/</code>.
+          {gitBacked
+            ? 'Agents are synced to a private git repo on every save.'
+            : 'Agents are stored as .md files in agents/.'}
         </p>
       </div>
     </div>

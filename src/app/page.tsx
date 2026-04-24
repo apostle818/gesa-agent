@@ -33,6 +33,8 @@ export default function Home() {
   const [maxTurns, setMaxTurns] = useState(8);
   const [currentTurn, setCurrentTurn] = useState(0);
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
+  const [gitBacked, setGitBacked] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingUserMsg = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -51,10 +53,31 @@ export default function Home() {
 
   useEffect(() => {
     refreshAgents();
+    fetch('/api/agents/sync')
+      .then(r => r.json())
+      .then(data => setGitBacked(Boolean(data?.gitBacked)))
+      .catch(() => setGitBacked(false));
   }, [refreshAgents]);
 
   const handleAgentSaved = useCallback(async () => {
     await refreshAgents();
+  }, [refreshAgents]);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/agents/sync', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Sync failed');
+      if (Array.isArray(data?.agents)) setAgents(data.agents);
+      else await refreshAgents();
+    } catch (e) {
+      if (typeof window !== 'undefined') {
+        window.alert(e instanceof Error ? e.message : 'Sync failed');
+      }
+    } finally {
+      setSyncing(false);
+    }
   }, [refreshAgents]);
 
   const handleDeleteAgent = useCallback(
@@ -262,6 +285,9 @@ export default function Home() {
         onClone={agent => setEditorMode({ kind: 'clone', source: agent })}
         onEdit={agent => setEditorMode({ kind: 'edit', source: agent })}
         onDelete={handleDeleteAgent}
+        gitBacked={gitBacked}
+        syncing={syncing}
+        onSync={handleSync}
       />
 
       {editorMode && (

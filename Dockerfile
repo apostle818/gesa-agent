@@ -19,7 +19,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN addgroup --system --gid 1001 nodejs \
+# `git` is used at runtime when GESA_AGENTS_REPO_URL is set, so agent edits
+# made in the GUI can be committed and pushed to a private repo.
+RUN apk add --no-cache git \
+ && addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public

@@ -2,8 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 import { AgentConfig, ModelProvider } from '@/types';
-
-const AGENTS_DIR = path.join(process.cwd(), 'agents');
+import {
+  AGENTS_DIR,
+  commitAndPush,
+  ensureRepo,
+  isGitBacked,
+  withLock,
+} from '@/lib/gitRepo';
 
 export const SUPPORTED_COLORS = [
   'purple', 'blue', 'green', 'orange', 'red', 'pink', 'teal', 'yellow',
@@ -49,7 +54,7 @@ function colorFromIndex(i: number): string {
   return SUPPORTED_COLORS[i % SUPPORTED_COLORS.length];
 }
 
-export function loadAgents(): AgentConfig[] {
+function readAgentsFromDisk(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
 
   return fs
@@ -71,8 +76,21 @@ export function loadAgents(): AgentConfig[] {
     });
 }
 
-export function loadAgent(id: string): AgentConfig | undefined {
-  return loadAgents().find(a => a.id === id);
+export async function loadAgents(): Promise<AgentConfig[]> {
+  if (isGitBacked()) {
+    try {
+      await ensureRepo();
+    } catch (err) {
+      // Surface via console but still return whatever we have on disk so the
+      // UI doesn't wedge on a network blip.
+      console.error('[agents] ensureRepo failed:', err);
+    }
+  }
+  return readAgentsFromDisk();
+}
+
+export async function loadAgent(id: string): Promise<AgentConfig | undefined> {
+  return (await loadAgents()).find(a => a.id === id);
 }
 
 export interface AgentInput {
@@ -135,39 +153,72 @@ function writeAgentFile(id: string, input: AgentInput): AgentConfig {
     model: input.model,
     modelVersion: frontmatter.modelVersion || DEFAULT_MODEL_VERSION[input.model],
     systemPrompt: input.systemPrompt.trim(),
-    color: input.color || colorFromIndex(loadAgents().findIndex(a => a.id === id)),
+    color: input.color || colorFromIndex(readAgentsFromDisk().findIndex(a => a.id === id)),
   };
 }
 
-export function createAgent(input: AgentInput): AgentConfig {
+async function persistChange(message: string, relPath: string): Promise<void> {
+  if (!isGitBacked()) return;
+  await commitAndPush({ message, paths: [relPath] });
+}
+
+export async function createAgent(input: AgentInput): Promise<AgentConfig> {
   const err = validate(input);
   if (err) throw new Error(err);
 
   const base = slugify(input.name);
   if (!base) throw new Error('name must contain alphanumeric characters');
 
-  const id = uniqueId(base);
-  return writeAgentFile(id, input);
+  if (isGitBacked()) await ensureRepo();
+
+  return withLock(async () => {
+    const id = uniqueId(base);
+    const agent = writeAgentFile(id, input);
+    try {
+      await persistChange(`gui: create ${id}`, `${id}.md`);
+    } catch (e) {
+      // commitAndPush already rolled the working tree back; drop any stray file.
+      try { fs.unlinkSync(agentPath(id)); } catch { /* already gone */ }
+      throw e;
+    }
+    return agent;
+  });
 }
 
-export function updateAgent(id: string, input: AgentInput): AgentConfig {
+export async function updateAgent(id: string, input: AgentInput): Promise<AgentConfig> {
   const err = validate(input);
   if (err) throw new Error(err);
+
+  if (isGitBacked()) await ensureRepo();
 
   if (!fs.existsSync(agentPath(id))) {
     throw new Error('Agent not found');
   }
-  return writeAgentFile(id, input);
+
+  return withLock(async () => {
+    const agent = writeAgentFile(id, input);
+    await persistChange(`gui: update ${id}`, `${id}.md`);
+    return agent;
+  });
 }
 
-export function deleteAgent(id: string): void {
+export async function deleteAgent(id: string): Promise<void> {
+  if (isGitBacked()) await ensureRepo();
+
   const p = agentPath(id);
   if (!fs.existsSync(p)) throw new Error('Agent not found');
-  fs.unlinkSync(p);
+
+  await withLock(async () => {
+    fs.unlinkSync(p);
+    await persistChange(`gui: delete ${id}`, `${id}.md`);
+  });
 }
 
-export function cloneAgent(sourceId: string, overrides?: Partial<AgentInput>): AgentConfig {
-  const src = loadAgent(sourceId);
+export async function cloneAgent(
+  sourceId: string,
+  overrides?: Partial<AgentInput>
+): Promise<AgentConfig> {
+  const src = await loadAgent(sourceId);
   if (!src) throw new Error('Source agent not found');
 
   const name = overrides?.name?.trim() || `${src.name} (copy)`;

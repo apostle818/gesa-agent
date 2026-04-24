@@ -12,11 +12,19 @@ conversation, and the user can inject messages between turns.
 - `src/lib/agents.ts` — reads, validates, and writes those files. Exposes
   `loadAgents`, `loadAgent`, `createAgent`, `updateAgent`, `deleteAgent`,
   `cloneAgent`. IDs are slugified from the name; paths are kept inside
-  `agents/` to prevent traversal.
+  `agents/` to prevent traversal. All write ops are async and go through
+  `gitRepo.withLock` so the in-process git mutex serializes them.
+- `src/lib/gitRepo.ts` — optional git-backed persistence. When
+  `GESA_AGENTS_REPO_URL` is set, the `agents/` directory becomes a clone
+  of a private repo; create/update/delete commit+push on save and roll
+  back the working tree on push failure. See "Agent persistence" below.
 - `src/lib/llm.ts` — `streamClaude` (Anthropic SDK) and `streamMistral`
   (raw fetch + SSE) generators. Mistral has exponential backoff on 429s.
 - `src/app/api/agents/route.ts` — `GET` list, `POST` create/clone.
 - `src/app/api/agents/[id]/route.ts` — `PUT` update, `DELETE` remove.
+- `src/app/api/agents/sync/route.ts` — `GET` returns
+  `{gitBacked: boolean}`; `POST` pulls from the remote and returns the
+  refreshed agent list. Only useful when git-backed persistence is on.
 - `src/app/api/chat/route.ts` — `POST` returns a streaming text response
   for one agent turn given the running history.
 - `src/app/page.tsx` — client-side orchestrator. Loops through selected
@@ -27,18 +35,50 @@ conversation, and the user can inject messages between turns.
 - `src/components/AgentEditor.tsx` — modal form used by create / clone /
   edit.
 
-## Agent persistence & Docker
+## Agent persistence
 
-The GUI writes to `agents/` at runtime. For those writes to survive a
-container restart, mount the directory read-write:
+Three modes, in order of increasing portability:
 
-```yaml
-volumes:
-  - ./agents:/app/agents  # NOT :ro — GUI needs write access
-```
+1. **Baked-in only** (default). Agents ship inside the image; GUI edits live
+   only inside the running container and are lost on restart. Fine for
+   read-only demos.
+2. **Local volume**. Mount `./agents:/app/agents` (read-write — no `:ro`)
+   so edits survive container restarts on that host.
+3. **Private git repo** (recommended for real use). Set the `GESA_AGENTS_*`
+   env vars and every GUI create/update/delete is committed and pushed.
+   Survives restarts *without* a volume, gives you free version history,
+   and lets humans edit `.md` files directly in the repo.
 
-The example in `docker-compose.yml` is commented out and previously used
-`:ro`; anyone enabling the mount now should drop the `:ro` suffix.
+The git-backed mode lives in `src/lib/gitRepo.ts`:
+
+- `GESA_AGENTS_REPO_URL` — HTTPS clone URL (GitHub, Gitea, Forgejo, GitLab,
+  Bitbucket all work).
+- `GESA_AGENTS_TOKEN` — PAT with read+write on that one repo. Injected into
+  the URL as `x-access-token:<token>@…` at clone time (stored in
+  `.git/config` inside the container, redacted from error messages).
+- `GESA_AGENTS_BRANCH` — default `main`.
+- `GESA_AGENTS_COMMIT_NAME` / `GESA_AGENTS_COMMIT_EMAIL` — commit identity.
+
+Boot flow (in `ensureRepo`, lazily on first request):
+
+- If `agents/` isn't a git repo, `git init`; set origin to the authenticated
+  URL; configure identity.
+- If the remote branch exists: `fetch` + hard-reset to it (remote wins on
+  boot, so external edits via git propagate).
+- If not: push the current working tree up to seed the repo from the
+  baked-in agents.
+
+Write flow (every `createAgent` / `updateAgent` / `deleteAgent`, serialized
+through a single in-process mutex):
+
+- Apply the fs change.
+- `git add <file>` → `git commit -m "gui: <verb> <id>"` → `git push`.
+- On push failure, `git reset --hard <prevSha>` so on-disk state matches
+  what is actually persisted remotely, then throw to the API caller.
+
+Manual pull is exposed at `POST /api/agents/sync`; the Refresh button in
+`AgentPanel` calls it so external `.md` edits show up without a restart.
+`git` is installed in the runtime image (`Dockerfile` runner stage).
 
 ## Next phases (not yet implemented)
 

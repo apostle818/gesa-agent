@@ -9,7 +9,7 @@ export async function PUT(
 ) {
   try {
     const body = await request.json();
-    const agent = updateAgent(params.id, {
+    const agent = await updateAgent(params.id, {
       name: body.name,
       model: body.model,
       modelVersion: body.modelVersion,
@@ -29,7 +29,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    deleteAgent(params.id);
+    await deleteAgent(params.id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to delete agent';

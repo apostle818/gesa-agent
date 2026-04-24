@@ -5,7 +5,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    return NextResponse.json(loadAgents());
+    const agents = await loadAgents();
+    return NextResponse.json(agents);
   } catch {
     return NextResponse.json({ error: 'Failed to load agents' }, { status: 500 });
   }
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     if (body?.cloneFrom && typeof body.cloneFrom === 'string') {
-      const agent = cloneAgent(body.cloneFrom, {
+      const agent = await cloneAgent(body.cloneFrom, {
         name: body.name,
         model: body.model,
         modelVersion: body.modelVersion,
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(agent, { status: 201 });
     }
 
-    const agent = createAgent({
+    const agent = await createAgent({
       name: body.name,
       model: body.model,
       modelVersion: body.modelVersion,

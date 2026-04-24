@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
   const { agentId, history }: { agentId: string; history: ConversationMessage[] } =
     await request.json();
 
-  const agent = loadAgent(agentId);
+  const agent = await loadAgent(agentId);
   if (!agent) return new Response('Agent not found', { status: 404 });
 
   const encoder = new TextEncoder();
