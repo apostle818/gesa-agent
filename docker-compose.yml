@@ -18,10 +18,19 @@ services:
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-4-7}
       MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-large-latest}
       MISTRAL_MAX_RETRIES: ${MISTRAL_MAX_RETRIES:-4}
+      # Optional: sync agent .md files to a private git repo so GUI edits
+      # survive container restarts without a local volume. Leave blank to
+      # fall back to the baked-in / locally-mounted agents/ directory.
+      GESA_AGENTS_REPO_URL: ${GESA_AGENTS_REPO_URL:-}
+      GESA_AGENTS_TOKEN: ${GESA_AGENTS_TOKEN:-}
+      GESA_AGENTS_BRANCH: ${GESA_AGENTS_BRANCH:-main}
+      GESA_AGENTS_COMMIT_NAME: ${GESA_AGENTS_COMMIT_NAME:-gesa-agent}
+      GESA_AGENTS_COMMIT_EMAIL: ${GESA_AGENTS_COMMIT_EMAIL:-gesa-agent@localhost}
       NODE_ENV: production
-    # Mount your own agent prompts over the baked-in ones (optional).
+    # Mount your own agent prompts over the baked-in ones. Drop :ro if you
+    # want GUI edits to persist here instead of (or alongside) the git repo.
     # volumes:
-    #   - ./agents:/app/agents:ro
+    #   - ./agents:/app/agents
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
